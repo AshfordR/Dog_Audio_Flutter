@@ -1,12 +1,14 @@
-# from flask import Flask, render_template, request, redirect, url_for
+# from flask import Flask, request, jsonify
 # import librosa
 # import numpy as np
 # import pickle
 # import os
 # from werkzeug.utils import secure_filename
+# from flask_cors import CORS
 
 # # Initialize Flask app
 # app = Flask(__name__)
+# CORS(app)  # Enable CORS for all routes
 
 # # Load the trained model and RFE selector
 # with open('model/dog_bark_classifier33.pkl', 'rb') as model_file:
@@ -24,68 +26,42 @@
 #                            np.mean(chroma.T, axis=0),
 #                            np.mean(spectral_contrast.T, axis=0)))
 
-# # Home page route
+# # Default route to show backend is running
 # @app.route('/')
 # def index():
-#     return render_template('index.html')
+#     return "<h1>Backend is running</h1>" 
 
-# # Prediction route
 # @app.route('/predict', methods=['POST'])
 # def predict():
-#     print("Received method:", request.method)  # Debugging line
 #     if 'audiofile' not in request.files:
-#         return redirect(request.url)
+#         return jsonify({"error": "No file part in the request"}), 400
 
 #     file = request.files['audiofile']
-#     if file and file.filename.endswith('.wav'):
-#         # Save the file to a secure location
+    
+#     # Log file details for debugging
+#     print(f"Received file: {file.filename}, MIME type: {file.mimetype}")
+
+#     # Check MIME type to confirm it's a .wav file
+#     if file and file.mimetype == 'audio/x-wav':
 #         filename = secure_filename(file.filename)
 #         filepath = os.path.join('uploads', filename)
 #         file.save(filepath)
 
-#         # Load the audio and extract features
 #         y, sr = librosa.load(filepath, sr=22050)
 #         features = extract_features(y, sr)
 #         features_rfe = rfe.transform(features.reshape(1, -1))
 
-#         # Predict the class
 #         prediction = model.predict(features_rfe)[0]
-        
-#         return render_template('result.html', prediction=prediction)
 
-#     return redirect(url_for('index'))
+#         return jsonify({"prediction": prediction})
+
+#     return jsonify({"error": "Only .wav files are accepted"}), 400
 
 # if __name__ == '__main__':
 #     # Ensure uploads folder exists
 #     if not os.path.exists('uploads'):
 #         os.makedirs('uploads')
-#     app.run(debug=True)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+#     app.run(debug=True, host='0.0.0.0', port=5000)  # Change host to '0.0.0.0'
 
 
 
@@ -101,6 +77,7 @@ import pickle
 import os
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
+from moviepy.editor import VideoFileClip
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -129,29 +106,45 @@ def index():
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    if 'audiofile' not in request.files:
+    if 'videofile' not in request.files:
         return jsonify({"error": "No file part in the request"}), 400
 
-    file = request.files['audiofile']
+    file = request.files['videofile']
     
     # Log file details for debugging
     print(f"Received file: {file.filename}, MIME type: {file.mimetype}")
 
-    # Check MIME type to confirm it's a .wav file
-    if file and file.mimetype == 'audio/x-wav':
+    # Check MIME type to confirm it's a video file
+    if file and file.mimetype.startswith('video/'):
         filename = secure_filename(file.filename)
         filepath = os.path.join('uploads', filename)
         file.save(filepath)
 
-        y, sr = librosa.load(filepath, sr=22050)
-        features = extract_features(y, sr)
-        features_rfe = rfe.transform(features.reshape(1, -1))
+        # Extract audio from the video
+        try:
+            video = VideoFileClip(filepath)
+            audio_path = os.path.join('uploads', 'extracted_audio.wav')
+            video.audio.write_audiofile(audio_path)
+        except Exception as e:
+            return jsonify({"error": f"Error extracting audio: {str(e)}"}), 500
 
-        prediction = model.predict(features_rfe)[0]
+        # Process the extracted audio
+        try:
+            y, sr = librosa.load(audio_path, sr=22050)
+            features = extract_features(y, sr)
+            features_rfe = rfe.transform(features.reshape(1, -1))
 
-        return jsonify({"prediction": prediction})
+            prediction = model.predict(features_rfe)[0]
 
-    return jsonify({"error": "Only .wav files are accepted"}), 400
+            return jsonify({"prediction": prediction})
+        except Exception as e:
+            return jsonify({"error": f"Error processing audio: {str(e)}"}), 500
+        finally:
+            # Clean up extracted audio
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
+
+    return jsonify({"error": "Only video files are accepted"}), 400
 
 if __name__ == '__main__':
     # Ensure uploads folder exists
